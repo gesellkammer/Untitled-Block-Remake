@@ -71,15 +71,22 @@ SynthDef(\blk, {
 	atk, rel: attack and release of the system
 	avgRate: the rate at which the current level of the key signal is averaged. This
 	is used to "follow" the key signal
-	keyAmpFactor: the key signal is amp followed, and the up/down movements of this
-	curve are derived as a factor of atk/rel.
-	keyOffset: how much above the current avg. should the key signal be to open the compressor
+	keyEnvFactor: the key signal is amp followed, and the up/down movements of this
+	curve are derived as a factor of atk/rel. Use 1 to use the same attack/release times as 
+	the compressor
+	keyOffset: a value to add to the key envelope to offset it artificialy from the threshold
+	If set two high, the compressor remains always open. Normal settings: between -0.1 and 0
 	hiMinDur: min. duration that the compressor gate will remain open (applying gainhi)
 	loMinDur: min. duration that the compressor gate will remain closed (applying gainlo)
+	gainhi: gain applied to the signal when the compressor is open
+	gainlo: gain applied to the signal when the compressor is closed
+	sugGain: gain of SUB passed to the output
+	wallGain: gain of WALL passed to the output (signal = SUB*subGain + WALL*wallGain)
+	subKeyGain: gain of SUB passed to the key input of the compressor
+	wallKeyGain: gain of WALL passed to the key input of the compressor
 	durDev: a deviation factor. A Gaussian distribution is calculated around hiMinDur and loMinDur,
 	with this value as its deviation factor (0.1 is 10% deviation)
-	TODO: add a Compressor AFTER the processing, to control spikes
-
+	
 	*/
 	var sub = loopbuf2.(bufsub, 1, 1);
 	var wall = loopbuf2.(bufwall, 1, 1);
@@ -117,7 +124,6 @@ x = Synth(\blk, args:[bufsub: ~sub, bufwall: ~wall])
 
 x.set(\hiMinDur, 0.05, \loMinDur, 0.03, \keyGain, 2, \atk, 0.005, \rel, 0.02, \gainhi, 0.05, \gainlo, 1, \subGain, 1.5, \wallGain, 0.5, \keyFactor, 0.9, \avgRate, 8, \keyEnvFactor, 1, \durDev, 0.2)
 
-iu
 
 
 // ===================================================
