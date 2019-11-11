@@ -61,22 +61,40 @@ var loopbuf2 = {|buf, marginLeft, marginRight|
 };
 
 
-var compress = {|sig, thresh= -24, knee=8, ratio=2, gain= -3, autogain=1, attack=0.0, release=0.1|
+var peakCompressor = {|in, control, thresh= -10, ratio=1, knee=6, attack=0, release=0.05, makeUp=0|
+	var db, reduction, frac;
+	makeUp = ( (thresh.neg * ( 1 - ratio )) * makeUp ).dbamp; // autogain
+	db =  Amplitude.ar(control, attackTime:attack, releaseTime:release).ampdb;
+	frac = ((db+(knee-thresh)) / (2 * knee.max(1e-12))).clip(0,1);
+	ratio = 1 + (frac * (ratio - 1));
+	thresh = thresh - ( (1-frac) * knee );
+	reduction = ((thresh - db).min(0) * (1-ratio)).dbamp;
+	in * (reduction * makeUp);
+};
+
+var compress = {|sig, thresh= -24, knee=8, ratio=2, makeUp=0, autogain=1, attack=0.0, release=0.1|
     /*
     -- the softknee begins at thresh - knee
-    -- gain has only meaning when autogain is on
-    -- a bigger ratio means more compression
+	-- a bigger ratio means more compression
     */
-    var times = [attack, release];
-    var slopeAbove = 1.0/ratio;
-    var gain2 = Select.kr(autogain, [gain, (thresh.neg * ( 1 - slopeAbove )) + gain]); // autogain
-    var amp = Amplitude.ar( sig, *times ).linlin(
-        (thresh-knee).dbamp, (thresh+knee).dbamp, 0, 1
-    ).clip(0,1).sqrt;
-    knee = knee.max(0.0001);
+    var slopeAbove, amp, gain, thresh2;
+	knee = knee.max(0.0001);
+	slopeAbove = 1.0/ratio;
+	amp = Amplitude.ar(sig, attackTime:attack, releaseTime:release);
+	amp = amp.linlin((thresh-knee).dbamp, thresh.dbamp, 0, 1).clip(0, 1).sqrt;
+	gain = makeUp.dbamp;
+	gain = Select.kr(autogain, [gain, (thresh.neg.dbamp * ( 1 - slopeAbove ))+gain]);
+    // var gain2 = Select.kr(autogain, [gain_amp, (thresh.neg.dbamp * ( 1 - slopeAbove )) + gain]); // autogain
     slopeAbove = amp.linlin(0, 1, slopeAbove, 1);
-    thresh     = amp.linlin(0, 1, thresh, thresh-knee);
-    Compander.ar( sig, sig, thresh.dbamp, 1, slopeAbove, *times ) * gain2.dbamp;
+    thresh2 = amp.linlin(0, 1, thresh, thresh-knee);
+    sig = Compander.ar(sig, sig,
+		thresh:thresh2.dbamp,
+		slopeBelow:1,
+		slopeAbove:slopeAbove,
+		clampTime: attack,
+		relaxTime: release);
+	sig = sig * gain;
+	sig;
 };
 
 
@@ -85,11 +103,15 @@ var guard = {|sig|
 };
 
 
-var limiter = {|sig, soft_thresh= -3, hard_thresh= -0.1, knee=3, ratio=4, attack=0.0008, release=0.1, lookahead=0|
+var limiter = {|sig, softThresh= -3, hardThresh= -0.1, knee=3, ratio=4, attack=0.0008, release=0.1, lookahead=0|
     // a soft limiter
     var look = max(lookahead, ControlDur.ir);
-    sig = compress.(sig, soft_thresh, knee, ratio, attack:attack, release:release, autogain:0);
-    sig = Limiter.ar(sig, hard_thresh.dbamp, look);
+    sig = compress.(sig, softThresh, knee, ratio, attack:attack, release:release, makeUp:0, autogain:0);
+	// sig = peakCompressor.(sig, control:sig, thresh:soft_thresh, ratio:ratio,
+	//	knee:knee, attack:attack, release:release, makeUp:0);
+	// sig = Compander.ar(sig, sig, thresh:softThresh.dbamp, slopeBelow:1, slopeAbove:1/ratio,
+	//	clampTime:attack, relaxTime:relaxTime);
+    sig = Limiter.ar(sig, hardThresh.dbamp, look);
     sig = guard.(sig);
     sig;
 };
@@ -149,12 +171,17 @@ SynthDef(\blk, {
 	var gain = Select.ar(compGate, [gainlosig, gainhisig]);
 	sig = sig * gain.lagud(atk, rel);
 	sig = CompanderD.ar(sig, thresh: -12.dbamp, slopeAbove:0.3, clampTime:atk, relaxTime:rel)*2;
-	sig = limiter.(sig, attack:0.008, release:0.1);
+	sig = limiter.(sig, attack:0.008, release:0.1, ratio:8, softThresh:-1 );
 	Out.ar(0, sig);
 }).add;
 )
 
 x = Synth(\blk, args:[bufsub: ~sub, bufwall: ~wall])
 
-x.set(\hiMinDur, 0.05, \loMinDur, 0.03, \keyGain, 2, \atk, 0.005, \rel, 0.02, \gainhi, 0.05, \gainlo, 1, \subGain, 1.5, \wallGain, 0.5, \keyFactor, 0.9, \avgRate, 8, \keyEnvFactor, 1, \durDev, 0.2)
+x.set(\hiMinDur, 0.05, \loMinDur, 0.03, \keyGain, 1, \atk, 0.005, \rel, 0.02, \gainhi, 0.01, \gainlo, 1, \subGain, 1.5, \wallGain, 0.5, \keyFactor, 0.95, \avgRate, 4, \keyEnvFactor, 1, \durDev, 0.2)
 
+x.set(\hiMinDur, 0.3, \loMinDur, 0.05, \keyGain, 1, \atk, 0.1, \rel, 0.6, \gainhi, 0.001, \gainlo, 1, \subGain, 0.2, \wallGain, 0.001, \keyFactor, 1.00, \avgRate, 3, \keyEnvFactor, 1, \durDev, 0.3)
+
+x.set(\hiMinDur, 0.3, \loMinDur, 0.01, \keyGain, 1, \atk, 0.001, \rel, 0.005, \gainhi, 0.001, \gainlo, 1, \subGain, 0.2, \wallGain, 0.001, \keyFactor, 0.98, \avgRate, 2, \keyEnvFactor, 1, \durDev, 0.4)
+
+x.set(\hiMinDur, 0.02, \loMinDur, 0.01, \keyGain, 1, \atk, 0.005, \rel, 0.01, \gainhi, 0.01, \gainlo, 1, \subGain, 0.5, \wallGain, 1, \keyFactor, 0.95, \avgRate, 8, \keyEnvFactor, 1, \durDev, 0.3)
